@@ -111,7 +111,7 @@ def search(
                 'simple',
                 description,
                 plainto_tsquery('simple', %s),
-                'startsel=<em>,stopsel=</em>,maxfragments=2,fragmentsize=200,highlightall=true'
+                'startsel=<em>,stopsel=</em>,maxfragments=2,maxwords=200,highlightall=true'
             ) AS highlight
         FROM discourses
         WHERE {base_where}
