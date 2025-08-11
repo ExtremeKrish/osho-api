@@ -17,6 +17,16 @@ if not DB_URL:
 
 app = FastAPI(title="Osho Discourse Search API")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or set specific origins ["https://example.com"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 def get_conn():
     # Simple connection per request. For higher load, swap to a pool.
