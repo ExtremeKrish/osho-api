@@ -183,3 +183,8 @@ def search(
         "limit": limit,
         "results": results
     }
+    
+@app.get("/jinda")
+def ping():
+    # This does nothing, just keeps the app awake
+    return {"status": "ha"}
