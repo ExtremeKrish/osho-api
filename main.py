@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import psycopg2
 import psycopg2.extras
-
+import re
 load_dotenv()
 
 DB_URL = os.getenv("DATABASE_URL")
@@ -43,6 +43,34 @@ class SearchResponse(BaseModel):
 
 
 @app.get("/search", response_model=SearchResponse)
+def extract_highlight(text: str, query: str, context_words: int = 5):
+    # Replace <br> with spaces and remove other HTML tags
+    clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    clean_text = re.sub(r"<.*?>", "", clean_text)
+
+    # Tokenize words preserving original case
+    words = clean_text.split()
+    lower_words = [w.lower() for w in words]
+    query_words = query.lower().split()
+
+    # Find the starting index of the exact phrase
+    for i in range(len(lower_words) - len(query_words) + 1):
+        if lower_words[i:i+len(query_words)] == query_words:
+            start_word = max(0, i - context_words)
+            end_word = min(len(words), i + len(query_words) + context_words)
+            snippet = words[start_word:end_word]
+
+            # Highlight the matched phrase
+            match_in_snippet_start = i - start_word
+            match_in_snippet_end = match_in_snippet_start + len(query_words)
+            snippet[match_in_snippet_start:match_in_snippet_end] = [
+                f"<b>{w}</b>" for w in snippet[match_in_snippet_start:match_in_snippet_end]
+            ]
+
+            return " ".join(snippet)
+
+    return text  # fallback if not found
+
 def search(
     query: str = Query(..., min_length=1, description="Exact phrase to search in description"),
     limit: int = Query(10, ge=1, le=200),
@@ -101,43 +129,7 @@ def search(
         cur.execute(search_sql, params_with_limit)
         rows = cur.fetchall()
         for r in rows:
-            desc = r["description"]
-            lower_desc = desc.lower()
-            lower_query = query.lower()
-        
-            if lower_query in lower_desc:
-                # Find where it matched
-                start_idx = lower_desc.index(lower_query)
-                end_idx = start_idx + len(query)
-        
-                # Split description into words
-                words = desc.split()
-                
-                # Find the word index of the match
-                char_count = 0
-                match_word_index = None
-                for i, w in enumerate(words):
-                    if char_count <= start_idx < char_count + len(w):
-                        match_word_index = i
-                        break
-                    char_count += len(w) + 1  # +1 for space
-        
-                if match_word_index is not None:
-                    start_word = max(match_word_index - 5, 0)
-                    end_word = min(match_word_index + 6, len(words))
-                    snippet_words = words[start_word:end_word]
-                    
-                    # Highlight matched word(s)
-                    snippet_words[match_word_index - start_word] = (
-                        f"<b>{snippet_words[match_word_index - start_word]}</b>"
-                    )
-        
-                    highlight = " ".join(snippet_words)
-                else:
-                    highlight = desc  # fallback
-            else:
-                highlight = desc  # no match
-        
+            highlight = extract_highlight(r["description"], query, context_words=5)
             results.append({
                 "title": r["title"],
                 "slug": r["slug"],
