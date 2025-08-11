@@ -101,11 +101,43 @@ def search(
         cur.execute(search_sql, params_with_limit)
         rows = cur.fetchall()
         for r in rows:
-            # Highlight exact phrase
             desc = r["description"]
-            highlight = desc.replace(
-                query, f"<em>{query}</em>"
-            ) if query.lower() in desc.lower() else desc
+            lower_desc = desc.lower()
+            lower_query = query.lower()
+        
+            if lower_query in lower_desc:
+                # Find where it matched
+                start_idx = lower_desc.index(lower_query)
+                end_idx = start_idx + len(query)
+        
+                # Split description into words
+                words = desc.split()
+                
+                # Find the word index of the match
+                char_count = 0
+                match_word_index = None
+                for i, w in enumerate(words):
+                    if char_count <= start_idx < char_count + len(w):
+                        match_word_index = i
+                        break
+                    char_count += len(w) + 1  # +1 for space
+        
+                if match_word_index is not None:
+                    start_word = max(match_word_index - 5, 0)
+                    end_word = min(match_word_index + 6, len(words))
+                    snippet_words = words[start_word:end_word]
+                    
+                    # Highlight matched word(s)
+                    snippet_words[match_word_index - start_word] = (
+                        f"<b>{snippet_words[match_word_index - start_word]}</b>"
+                    )
+        
+                    highlight = " ".join(snippet_words)
+                else:
+                    highlight = desc  # fallback
+            else:
+                highlight = desc  # no match
+        
             results.append({
                 "title": r["title"],
                 "slug": r["slug"],
