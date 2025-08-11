@@ -8,7 +8,6 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import psycopg2
 import psycopg2.extras
-from psycopg2.pool import SimpleConnectionPool
 
 load_dotenv()
 
@@ -18,25 +17,10 @@ if not DB_URL:
 
 app = FastAPI(title="Osho Discourse Search API")
 
-# ---------- Connection Pool ----------
-pool: SimpleConnectionPool = None
-
-@app.on_event("startup")
-def startup_event():
-    global pool
-    pool = SimpleConnectionPool(minconn=1, maxconn=5, dsn=DB_URL)
-
-@app.on_event("shutdown")
-def shutdown_event():
-    global pool
-    if pool:
-        pool.closeall()
 
 def get_conn():
-    return pool.getconn()
-
-def release_conn(conn):
-    pool.putconn(conn)
+    # Simple connection per request. For higher load, swap to a pool.
+    return psycopg2.connect(DB_URL)
 
 
 class SearchResponse(BaseModel):
@@ -65,14 +49,16 @@ def search(
 
     offset = (page - 1) * limit
 
-    # Base WHERE clause (full-text OR trigram)
+    # base WHERE clause (full-text OR trigram)
+    # We'll build SQL and params carefully to avoid injection.
     base_where = "(search_vector @@ plainto_tsquery('simple', %s) OR description %% %s)"
-    params_for_base = [query, query]
+    params_for_base = [query, query]  # used multiple times below
 
     # Additional filters
     filters = []
-    params = []
+    params = []  # final params list used for each statement
 
+    # We'll build a 'filter_sql' string and attach params accordingly.
     if lang:
         filters.append("language = %s")
         params.append(lang)
@@ -88,8 +74,10 @@ def search(
         WHERE {base_where}
         {filter_sql}
     """
+    # params order for count: [query, query] + params
     count_params = params_for_base + params
 
+    # run count
     try:
         conn = get_conn()
         cur = conn.cursor()
@@ -98,10 +86,18 @@ def search(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (count): {e}")
     finally:
-        cur.close()
-        release_conn(conn)
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
 
     # ---------- SEARCH (paginated) ----------
+    # We compute:
+    #   - ft_rank = ts_rank_cd(search_vector, plainto_tsquery('simple', query))
+    #   - trigram_sim = similarity(description, query)
+    # final order: first by ft_rank desc (if present), then by trigram_sim desc
+    # We also produce a highlighted snippet with ts_headline (simple config).
     search_sql = f"""
         SELECT
             title,
@@ -123,6 +119,10 @@ def search(
         ORDER BY ft_rank DESC, trigram_sim DESC
         LIMIT %s OFFSET %s
     """
+
+    # params for search:
+    # Notice order matters: first plainto_tsquery for ft_rank, then similarity param,
+    # then plainto_tsquery for ts_headline, then base_where's query params, then filters, then limit, offset.
     search_params = [query, query, query] + params_for_base + params + [limit, offset]
 
     results = []
@@ -134,6 +134,7 @@ def search(
         for r in rows:
             ft_rank = r["ft_rank"] or 0.0
             trigram = r["trigram_sim"] or 0.0
+            # final score: combine both. simple: max of the two normalized measures.
             score = max(ft_rank, trigram)
             results.append({
                 "title": r["title"],
@@ -144,13 +145,16 @@ def search(
                 "language": r["language"],
                 "series_name": r["series_name"],
                 "audioFile": r["audiofile"],
-                "highlight": r["highlight"] or ""
+                "highlight": r["highlight"] or (r["description"][:200] + "..." if r.get("description") else "")
             })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error (search): {e}")
     finally:
-        cur.close()
-        release_conn(conn)
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
 
     total_pages = ceil(total_found / limit) if limit else 1
 
