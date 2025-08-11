@@ -51,7 +51,7 @@ def search(
 
     # base WHERE clause (full-text OR trigram)
     # We'll build SQL and params carefully to avoid injection.
-    base_where = "(search_vector @@ plainto_tsquery('simple', %s) OR description % %s)"
+    base_where = "(search_vector @@ plainto_tsquery('simple', %s) OR description %% %s)"
     params_for_base = [query, query]  # used multiple times below
 
     # Additional filters
