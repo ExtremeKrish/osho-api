@@ -42,35 +42,30 @@ class SearchResponse(BaseModel):
     results: list
 
 
-@app.get("/search", response_model=SearchResponse)
 def extract_highlight(text: str, query: str, context_words: int = 5):
-    # Replace <br> with spaces and remove other HTML tags
+    import re
     clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
     clean_text = re.sub(r"<.*?>", "", clean_text)
-
-    # Tokenize words preserving original case
     words = clean_text.split()
     lower_words = [w.lower() for w in words]
     query_words = query.lower().split()
 
-    # Find the starting index of the exact phrase
     for i in range(len(lower_words) - len(query_words) + 1):
         if lower_words[i:i+len(query_words)] == query_words:
             start_word = max(0, i - context_words)
             end_word = min(len(words), i + len(query_words) + context_words)
             snippet = words[start_word:end_word]
-
-            # Highlight the matched phrase
-            match_in_snippet_start = i - start_word
-            match_in_snippet_end = match_in_snippet_start + len(query_words)
-            snippet[match_in_snippet_start:match_in_snippet_end] = [
-                f"<b>{w}</b>" for w in snippet[match_in_snippet_start:match_in_snippet_end]
+            match_start = i - start_word
+            match_end = match_start + len(query_words)
+            snippet[match_start:match_end] = [
+                f"<b>{w}</b>" for w in snippet[match_start:match_end]
             ]
-
             return " ".join(snippet)
 
-    return text  # fallback if not found
+    return text  # fallback
 
+
+@app.get("/search", response_model=SearchResponse)
 def search(
     query: str = Query(..., min_length=1, description="Exact phrase to search in description"),
     limit: int = Query(10, ge=1, le=200),
@@ -80,8 +75,7 @@ def search(
 ):
     offset = (page - 1) * limit
 
-    # Build WHERE clause
-    filters = ["description ILIKE %s"]  # Exact phrase match, case-insensitive
+    filters = ["description ILIKE %s"]
     params = [f"%{query}%"]
 
     if lang:
@@ -93,35 +87,26 @@ def search(
 
     filter_sql = " AND ".join(filters)
 
-    # ---------- COUNT ----------
+    # Count
     count_sql = f"SELECT COUNT(*) FROM discourses WHERE {filter_sql}"
     try:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(count_sql, params)
         total_found = cur.fetchone()[0]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DB error (count): {e}")
     finally:
         cur.close()
         conn.close()
 
-    # ---------- FETCH PAGINATED ----------
+    # Fetch
     search_sql = f"""
-        SELECT
-            title,
-            slug,
-            language,
-            series_name,
-            audioFile,
-            description
+        SELECT title, slug, language, series_name, audioFile, description
         FROM discourses
         WHERE {filter_sql}
         ORDER BY id ASC
         LIMIT %s OFFSET %s
     """
     params_with_limit = params + [limit, offset]
-
     results = []
     try:
         conn = get_conn()
@@ -138,14 +123,11 @@ def search(
                 "audioFile": r["audiofile"],
                 "highlight": highlight
             })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DB error (search): {e}")
     finally:
         cur.close()
         conn.close()
 
     total_pages = ceil(total_found / limit) if limit else 1
-
     return {
         "query": query,
         "total_found": total_found,
