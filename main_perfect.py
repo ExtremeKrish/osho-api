@@ -101,22 +101,17 @@ def extract_highlight(text: str, query: str, context_words: int = 5):
 
 @app.get("/search", response_model=SearchResponse)
 def search(
-    query: str = Query(..., min_length=1, description="Phrase to search"),
+    query: str = Query(..., min_length=1, description="Exact phrase to search in description"),
     limit: int = Query(10, ge=1, le=200),
     page: int = Query(1, ge=1),
     lang: Optional[str] = None,
     series: Optional[str] = None,
-    exactMatch: Optional[bool] = Query(False, description="Use exact phrase match with phraseto_tsquery"),
 ):
     offset = (page - 1) * limit
 
-    filters = []
-    params = []
-
-    # Choose which tsquery function to use based on exactMatch param
-    tsquery_func = "phraseto_tsquery" if exactMatch else "plainto_tsquery"
-    filters.append(f"search_vector @@ {tsquery_func}('simple', %s)")
-    params.append(query)
+    # Build WHERE clause
+    filters = ["description ILIKE %s"]  # Exact phrase match, case-insensitive
+    params = [f"%{query}%"]
 
     if lang:
         filters.append("language = %s")
@@ -127,6 +122,7 @@ def search(
 
     filter_sql = " AND ".join(filters)
 
+    # ---------- COUNT ----------
     count_sql = f"SELECT COUNT(*) FROM discourses WHERE {filter_sql}"
     try:
         conn = get_conn()
@@ -139,6 +135,7 @@ def search(
         cur.close()
         conn.close()
 
+    # ---------- FETCH PAGINATED ----------
     search_sql = f"""
         SELECT
             title,
@@ -186,7 +183,6 @@ def search(
         "limit": limit,
         "results": results
     }
-    
     
 @app.get("/jinda")
 def ping():
