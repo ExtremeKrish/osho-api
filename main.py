@@ -41,7 +41,7 @@ class SearchResponse(BaseModel):
     limit: int
     results: list
 
-
+'''
 def extract_highlight(text: str, query: str, context_words: int = 5):
     # Remove <br> and all HTML tags
     clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
@@ -68,6 +68,59 @@ def extract_highlight(text: str, query: str, context_words: int = 5):
 
     # If no match found, return empty string or some default text
     return ""
+'''
+
+
+def extract_highlight(text: str, query: str, context_words: int = 5):
+    # Clean text: remove <br> and HTML tags
+    clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    clean_text = re.sub(r"<.*?>", "", clean_text)
+
+    words = clean_text.split()
+    lower_words = [w.lower() for w in words]
+    query_words = query.lower().split()
+
+    if not words or not query_words:
+        return ""
+
+    if len(query_words) == 1:
+        # Single word search - highlight all occurrences
+        word_to_highlight = query_words[0]
+        # Find all positions of the word
+        indices = [i for i, w in enumerate(lower_words) if w == word_to_highlight]
+        if not indices:
+            return ""
+
+        # Use first occurrence to get context snippet
+        i = indices[0]
+        start = max(0, i - context_words)
+        end = min(len(words), i + context_words + 1)
+        snippet = words[start:end]
+
+        # Highlight all occurrences in snippet
+        snippet_lower = [w.lower() for w in snippet]
+        for j, w in enumerate(snippet_lower):
+            if w == word_to_highlight:
+                snippet[j] = f"<b>{snippet[j]}</b>"
+
+        return " ".join(snippet)
+
+    else:
+        # Phrase search - highlight first exact phrase match as a whole
+        for i in range(len(lower_words) - len(query_words) + 1):
+            if lower_words[i:i+len(query_words)] == query_words:
+                start = max(0, i - context_words)
+                end = min(len(words), i + len(query_words) + context_words)
+                snippet = words[start:end]
+
+                match_start = i - start
+                match_end = match_start + len(query_words)
+                phrase = " ".join(snippet[match_start:match_end])
+                snippet[match_start:match_end] = [f"<b>{phrase}</b>"]
+
+                return " ".join(snippet)
+
+        return ""  # No match found
 
 
 @app.get("/search", response_model=SearchResponse)
