@@ -41,62 +41,33 @@ class SearchResponse(BaseModel):
     limit: int
     results: list
 
-# def extract_highlight(text: str, query: str, context_words: int = 5):
-#     # Replace <br> with spaces and remove other HTML tags
-#     clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
-#     clean_text = re.sub(r"<.*?>", "", clean_text)
 
-#     # Tokenize words preserving original case
-#     words = clean_text.split()
-#     lower_words = [w.lower() for w in words]
-#     query_words = query.lower().split()
-
-#     # Find the starting index of the exact phrase
-#     for i in range(len(lower_words) - len(query_words) + 1):
-#         if lower_words[i:i+len(query_words)] == query_words:
-#             start_word = max(0, i - context_words)
-#             end_word = min(len(words), i + len(query_words) + context_words)
-#             snippet = words[start_word:end_word]
-
-#             # Highlight the matched phrase
-#             match_in_snippet_start = i - start_word
-#             match_in_snippet_end = match_in_snippet_start + len(query_words)
-#             snippet[match_in_snippet_start:match_in_snippet_end] = [
-#                 f"<b>{w}</b>" for w in snippet[match_in_snippet_start:match_in_snippet_end]
-#             ]
-
-#             return " ".join(snippet)
-
-#     return text  # fallback if not found
-    
 def extract_highlight(text: str, query: str, context_words: int = 5):
-    # Replace <br> with spaces and remove other HTML tags
+    # Remove <br> and all HTML tags
     clean_text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
     clean_text = re.sub(r"<.*?>", "", clean_text)
 
-    # Tokenize words preserving original case
     words = clean_text.split()
     lower_words = [w.lower() for w in words]
     query_words = query.lower().split()
 
-    # Find the starting index of the exact phrase
+    # Find the first exact phrase match
     for i in range(len(lower_words) - len(query_words) + 1):
         if lower_words[i:i+len(query_words)] == query_words:
-            start_word = max(0, i - context_words)
-            end_word = min(len(words), i + len(query_words) + context_words)
-            snippet = words[start_word:end_word]
+            start = max(0, i - context_words)
+            end = min(len(words), i + len(query_words) + context_words)
+            snippet = words[start:end]
 
-            # Find position of match in snippet
-            match_start = i - start_word
+            # Wrap the exact phrase inside <b>...</b>
+            match_start = i - start
             match_end = match_start + len(query_words)
-
-            # Join the matched phrase into one string and wrap it in <b>
             phrase = " ".join(snippet[match_start:match_end])
             snippet[match_start:match_end] = [f"<b>{phrase}</b>"]
 
             return " ".join(snippet)
 
-    return text  # fallback if not found
+    # If no match found, return empty string or some default text
+    return ""
 
 
 @app.get("/search", response_model=SearchResponse)
